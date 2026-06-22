@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>顔パーツ合成 — Face Part Swap</title>
+<style>
+  :root {
+    --bg: #0c0a0b;
+    --surface: #161214;
+    --border: #2a2228;
+    --pink: #dba8b4;
+    --pink-dim: #7a4f5a;
+    --text: #cfc4bc;
+    --text-dim: #6b5f5a;
+    --accent: #c27888;
+    --green: #7ec98a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Georgia', serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header h1 { font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--pink); font-weight: 400; }
+  header p { font-size: 11px; color: var(--text-dim); letter-spacing: 0.08em; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    min-height: calc(100vh - 65px);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .section-label {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  /* upload cards */
+  .upload-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .upload-card-head {
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .upload-card-head .badge {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--pink-dim);
+  }
+  .upload-card-head .badge.donor { background: #7a6a4a; }
+
+  .drop-zone {
+    height: 160px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    transition: background 0.2s;
+  }
+  .drop-zone:hover { background: rgba(219,168,180,0.04); }
+  .drop-zone img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover; opacity: 0.9;
+  }
+  .drop-zone canvas.thumb {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  .drop-placeholder {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 8px;
+    color: var(--text-dim);
+    pointer-events: none;
+  }
+  .drop-placeholder svg { width: 24px; height: 24px; opacity: 0.35; }
+  .drop-placeholder span { font-size: 11px; letter-spacing: 0.06em; }
+  .upload-overlay {
+    position: absolute; bottom: 8px; right: 8px;
+    background: rgba(12,10,11,0.85);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 10px; letter-spacing: 0.1em;
+    padding: 4px 8px; border-radius: 2px; cursor: pointer;
+  }
+  input[type=file] { display: none; }
+
+  /* landmark status */
+  .lm-status {
+    font-size: 10px;
+    padding: 6px 12px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-dim);
+  }
+  .lm-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border); }
+  .lm-dot.ok { background: var(--green); }
+  .lm-dot.loading { background: var(--pink-dim); animation: blink 1s infinite; }
+  .lm-dot.err { background: #c97e7e; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* parts chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip {
+    padding: 6px 13px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    font-size: 11px;
+    cursor: pointer;
+    color: var(--text-dim);
+    transition: all 0.15s;
+    user-select: none;
+  }
+  .chip:hover { border-color: var(--pink-dim); color: var(--text); }
+  .chip.on { border-color: var(--pink); color: var(--pink); background: rgba(219,168,180,0.07); }
+
+  /* blend slider */
+  .slider-row { display: flex; align-items: center; gap: 12px; }
+  .slider-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+  input[type=range] {
+    flex: 1;
+    -webkit-appearance: none;
+    height: 2px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--pink);
+    cursor: pointer;
+  }
+  .slider-val { font-size: 11px; color: var(--pink); font-family: monospace; width: 28px; text-align: right; }
+
+  /* run button */
+  .run-btn {
+    width: 100%;
+    padding: 13px;
+    background: transparent;
+    border: 1px solid var(--pink-dim);
+    color: var(--pink);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.18s;
+  }
+  .run-btn:hover:not(:disabled) { background: rgba(219,168,180,0.06); border-color: var(--pink); }
+  .run-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* ── Canvas area ── */
+  .canvas-area {
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+  }
+
+  .canvas-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+  }
+
+  .canvas-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .canvas-panel-head {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .canvas-wrap {
+    background: #0a080a;
+    min-height: 220px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+  }
+  .canvas-wrap canvas { max-width: 100%; display: block; }
+  .canvas-empty {
+    font-size: 11px;
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    text-align: center;
+    padding: 20px;
+    line-height: 1.8;
+  }
+
+  /* download */
+  .dl-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    padding: 3px 9px;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+  }
+  .dl-btn:hover { border-color: var(--pink-dim); color: var(--text); }
+
+  /* log */
+  .log-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 12px 14px;
+    font-family: 'Menlo','Monaco',monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.7;
+    min-height: 60px;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .log-box .ok { color: var(--green); }
+  .log-box .err { color: #c97e7e; }
+  .log-box .info { color: var(--pink); }
+
+  /* overlay dots on canvas */
+  .landmark-count {
+    position: absolute; bottom: 6px; right: 8px;
+    font-size: 10px; font-family: monospace;
+    color: var(--green); opacity: 0.7;
+  }
+
+  hr { border: none; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Face Part Swap</h1>
+    <p>MediaPipe FaceLandmarker — 顔パーツ合成デモ</p>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ═══ SIDEBAR ═══ -->
+  <div class="sidebar">
+
+    <!-- Base -->
+    <div>
+      <p class="section-label">Base Face（あなたの顔）</p>
+      <div class="upload-card">
+        <div class="upload-card-head">
+          <span>Base</span><span class="badge"></span>
+        </div>
+        <div class="drop-zone" id="zone-base" onclick="document.getElementById('file-base').click()">
+          <div class="drop-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+              <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+            </svg>
+            <span>クリックして選択</span>
+          </div>
+        </div>
+        <div class="lm-status"><span class="lm-dot" id="dot-base"></span><span id="lm-base-text">未読み込み</span></div>
+      </div>
+      <input type="file" id="file-base" accept="image/*" onchange="loadFace(this,'base')">
+    </div>
+
+    <!-- Donor -->
+    <div>
+      <p class="section-label">Donor Face（有名人など）</p>
+      <div class="upload-card">
+        <div class="upload-card-head">
+          <span>Donor</span><span class="badge donor"></span>
+        </div>
+        <div class="drop-zone" id="zone-donor" onclick="document.getElementById('file-donor').click()">
+          <div class="drop-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+              <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
+            </svg>
+            <span>クリックして選択</span>
+          </div>
+        </div>
+        <div class="lm-status"><span class="lm-dot" id="dot-donor"></span><span id="lm-donor-text">未読み込み</span></div>
+      </div>
+      <input type="file" id="file-donor" accept="image/*" onchange="loadFace(this,'donor')">
+    </div>
+
+    <hr>
+
+    <!-- Parts -->
+    <div>
+      <p class="section-label">合成するパーツ</p>
+      <div class="chips" id="chips">
+        <div class="chip on" data-part="eyes">目・アイライン</div>
+        <div class="chip" data-part="nose">鼻</div>
+        <div class="chip" data-part="mouth">口・唇</div>
+        <div class="chip" data-part="eyebrows">眉毛</div>
+        <div class="chip" data-part="jawline">輪郭・フェイスライン</div>
+      </div>
+    </div>
+
+    <!-- Blend -->
+    <div>
+      <p class="section-label">ブレンド強度</p>
+      <div class="slider-row">
+        <span class="slider-label">弱</span>
+        <input type="range" id="blend-slider" min="10" max="100" value="70" oninput="document.getElementById('blend-val').textContent=this.value+'%'">
+        <span class="slider-label">強</span>
+        <span class="slider-val" id="blend-val">70%</span>
+      </div>
+    </div>
+
+    <hr>
+
+    <button class="run-btn" id="run-btn" onclick="runSwap()" disabled>
+      パーツ合成を実行
+    </button>
+
+  </div>
+
+  <!-- ═══ CANVAS AREA ═══ -->
+  <div class="canvas-area">
+
+    <div class="canvas-row">
+
+      <!-- Base preview -->
+      <div class="canvas-panel">
+        <div class="canvas-panel-head">
+          <span>Base Face</span>
+          <button class="dl-btn" onclick="downloadCanvas('c-base')">DL</button>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="c-base"></canvas>
+          <div class="canvas-empty" id="empty-base">Base Faceを<br>アップロード</div>
+        </div>
+      </div>
+
+      <!-- Donor preview -->
+      <div class="canvas-panel">
+        <div class="canvas-panel-head">
+          <span>Donor Face</span>
+          <button class="dl-btn" onclick="downloadCanvas('c-donor')">DL</button>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="c-donor"></canvas>
+          <div class="canvas-empty" id="empty-donor">Donor Faceを<br>アップロード</div>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div class="canvas-panel">
+        <div class="canvas-panel-head">
+          <span>Result — 合成結果</span>
+          <button class="dl-btn" onclick="downloadCanvas('c-result')">DL</button>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="c-result"></canvas>
+          <div class="canvas-empty" id="empty-result">「合成実行」を<br>押してください</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Landmark overlay row -->
+    <div class="canvas-row">
+      <div class="canvas-panel">
+        <div class="canvas-panel-head"><span>Base ランドマーク</span></div>
+        <div class="canvas-wrap" style="min-height:180px">
+          <canvas id="c-lm-base"></canvas>
+          <div class="canvas-empty" id="empty-lm-base">画像読み込み後に表示</div>
+        </div>
+      </div>
+      <div class="canvas-panel">
+        <div class="canvas-panel-head"><span>Donor ランドマーク</span></div>
+        <div class="canvas-wrap" style="min-height:180px">
+          <canvas id="c-lm-donor"></canvas>
+          <div class="canvas-empty" id="empty-lm-donor">画像読み込み後に表示</div>
+        </div>
+      </div>
+      <div class="canvas-panel">
+        <div class="canvas-panel-head"><span>パーツ マスク</span></div>
+        <div class="canvas-wrap" style="min-height:180px">
+          <canvas id="c-mask"></canvas>
+          <div class="canvas-empty" id="empty-mask">合成後に表示</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-box" id="log"></div>
+
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MediaPipe + Synthesis Logic
+═══════════════════════════════════════════ -->
+<script type="module">
+
+// ── CDN imports ──────────────────────────────────────────────────────────────
+import { FaceLandmarker, FilesetResolver, DrawingUtils }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+// ── State ─────────────────────────────────────────────────────────────────────
+const state = {
+  base:  { img: null, landmarks: null },
+  donor: { img: null, landmarks: null },
+};
+let landmarker = null;
+
+// ── Logging ───────────────────────────────────────────────────────────────────
+function log(msg, type = '') {
+  const box = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = type;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── Init MediaPipe ─────────────────────────────────────────────────────────────
+async function initLandmarker() {
+  log('MediaPipe を初期化中...', 'info');
+  try {
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+    landmarker = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "GPU"
+      },
+      outputFaceBlendshapes: false,
+      runningMode: "IMAGE",
+      numFaces: 1
+    });
+    log('MediaPipe FaceLandmarker 準備完了（468点）', 'ok');
+  } catch(e) {
+    log('GPU失敗 → CPU で再試行...', 'info');
+    try {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+      );
+      landmarker = await FaceLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+          delegate: "CPU"
+        },
+        runningMode: "IMAGE",
+        numFaces: 1
+      });
+      log('CPU モードで初期化完了', 'ok');
+    } catch(e2) {
+      log('初期化失敗: ' + e2.message, 'err');
+    }
+  }
+}
+
+// ── Image load & detect ────────────────────────────────────────────────────────
+window.loadFace = async function(input, side) {
+  const file = input.files[0];
+  if (!file) return;
+
+  setDot(side, 'loading', '検出中...');
+  log(`${side}: 画像読み込み中...`);
+
+  const img = new Image();
+  img.onload = async () => {
+    state[side].img = img;
+
+    // Draw preview
+    const cId = 'c-' + side;
+    drawImageToCanvas(img, cId);
+    document.getElementById(`empty-${side}`).style.display = 'none';
+
+    // Update zone thumbnail
+    const zone = document.getElementById('zone-' + side);
+    zone.innerHTML = `
+      <img src="${img.src}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.9">
+      <span class="upload-overlay" onclick="event.stopPropagation();document.getElementById('file-${side}').click()">変更</span>
+    `;
+    zone.onclick = null;
+
+    // Run landmark detection
+    if (!landmarker) {
+      setDot(side, 'err', 'Landmarker未初期化');
+      return;
+    }
+
+    try {
+      const result = landmarker.detect(img);
+      if (result.faceLandmarks && result.faceLandmarks.length > 0) {
+        state[side].landmarks = result.faceLandmarks[0];
+        setDot(side, 'ok', `${result.faceLandmarks[0].length}点検出`);
+        log(`${side}: ${result.faceLandmarks[0].length}点のランドマーク検出 ✓`, 'ok');
+        drawLandmarks(img, result.faceLandmarks[0], 'c-lm-' + side);
+        document.getElementById(`empty-lm-${side}`).style.display = 'none';
+        checkReady();
+      } else {
+        setDot(side, 'err', '顔が検出できません');
+        log(`${side}: 顔が検出できませんでした。正面向きの顔写真を使用してください`, 'err');
+      }
+    } catch(e) {
+      setDot(side, 'err', 'エラー');
+      log(`${side}: 検出エラー — ${e.message}`, 'err');
+    }
+  };
+  img.src = URL.createObjectURL(file);
+};
+
+function setDot(side, state, text) {
+  const dot = document.getElementById(`dot-${side}`);
+  const txt = document.getElementById(`lm-${side}-text`);
+  dot.className = 'lm-dot ' + state;
+  txt.textContent = text;
+}
+
+function checkReady() {
+  const ok = state.base.landmarks && state.donor.landmarks;
+  document.getElementById('run-btn').disabled = !ok;
+  if (ok) log('両顔の検出完了 → 合成ボタンが有効になりました', 'ok');
+}
+
+// ── Draw helpers ──────────────────────────────────────────────────────────────
+function drawImageToCanvas(img, canvasId) {
+  const c = document.getElementById(canvasId);
+  const maxW = 400, maxH = 350;
+  let w = img.naturalWidth, h = img.naturalHeight;
+  if (w > maxW) { h = h * maxW / w; w = maxW; }
+  if (h > maxH) { w = w * maxH / h; h = maxH; }
+  c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+}
+
+function drawLandmarks(img, lms, canvasId) {
+  const c = document.getElementById(canvasId);
+  drawImageToCanvas(img, canvasId);
+  const ctx = c.getContext('2d');
+  const W = c.width, H = c.height;
+
+  // Draw all dots
+  ctx.fillStyle = 'rgba(219,168,180,0.5)';
+  lms.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x * W, p.y * H, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // Highlight selected parts
+  const selected = getSelectedParts();
+  const partColors = {
+    eyes: '#7ec98a', nose: '#89c4e0',
+    mouth: '#e0a889', eyebrows: '#c489e0', jawline: '#e0c889'
+  };
+  selected.forEach(part => {
+    const idxs = PART_INDICES[part];
+    if (!idxs) return;
+    ctx.fillStyle = partColors[part] || '#fff';
+    idxs.forEach(i => {
+      if (!lms[i]) return;
+      ctx.beginPath();
+      ctx.arc(lms[i].x * W, lms[i].y * H, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+}
+
+// ── Part landmark indices (MediaPipe 468-point) ───────────────────────────────
+const PART_INDICES = {
+  // Left + Right eyes
+  eyes: [
+    33,7,163,144,145,153,154,155,133,173,157,158,159,160,161,246,
+    362,382,381,380,374,373,390,249,263,466,388,387,386,385,384,398
+  ],
+  // Eyebrows
+  eyebrows: [70,63,105,66,107,55,65,52,53,46,336,296,334,293,300,276,283,282,295,285],
+  // Nose
+  nose: [1,2,5,4,19,94,3,168,197,195,196,3,48,64,98,97,2,326,327,294],
+  // Mouth / lips
+  mouth: [
+    61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146,
+    78,191,80,81,82,13,312,311,310,415,308,324,318,402,317,14,87,178,88,95
+  ],
+  // Jawline / face outline
+  jawline: [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109]
+};
+
+function getSelectedParts() {
+  return [...document.querySelectorAll('.chip.on')].map(c => c.dataset.part);
+}
+
+// ── Main swap logic ───────────────────────────────────────────────────────────
+window.runSwap = function() {
+  const bImg = state.base.img;
+  const dImg = state.donor.img;
+  const bLms = state.base.landmarks;
+  const dLms = state.donor.landmarks;
+  if (!bImg || !dImg || !bLms || !dLms) return;
+
+  const parts = getSelectedParts();
+  if (parts.length === 0) { log('パーツを1つ以上選択してください', 'err'); return; }
+
+  const blend = parseInt(document.getElementById('blend-slider').value) / 100;
+  log(`合成開始: [${parts.join(', ')}] ブレンド強度 ${Math.round(blend*100)}%`, 'info');
+
+  const SIZE = 512;
+
+  // ── 1. Base / Donor を正規化サイズで描画 ──
+  const bC = makeCanvas(SIZE);
+  bC.ctx.drawImage(bImg, 0, 0, SIZE, SIZE);
+
+  const dC = makeCanvas(SIZE);
+  dC.ctx.drawImage(dImg, 0, 0, SIZE, SIZE);
+
+  // ── 2. ランドマークをSIZE座標に変換 ──
+  const bPts = bLms.map(p => [p.x * SIZE, p.y * SIZE]);
+  const dPts = dLms.map(p => [p.x * SIZE, p.y * SIZE]);
+
+  // ── 3. アフィン変換でドナー顔をベース顔サイズに正規化 ──
+  //    目の内端2点 (base: 133, 362) を anchor として使う
+  const bEyeL = bPts[133], bEyeR = bPts[362];
+  const dEyeL = dPts[133], dEyeR = dPts[362];
+
+  const affine = computeAffine(
+    dEyeL, dEyeR,   // donor 目中心
+    bEyeL, bEyeR    // base  目中心 に合わせる
+  );
+
+  // アフィン変換済みのdonor canvasを作る
+  const dWarpC = makeCanvas(SIZE);
+  const dWarpCtx = dWarpC.ctx;
+  dWarpCtx.save();
+  dWarpCtx.transform(affine.a, affine.b, affine.c, affine.d, affine.e, affine.f);
+  dWarpCtx.drawImage(dImg, 0, 0, SIZE, SIZE);
+  dWarpCtx.restore();
+
+  // アフィン変換済みのdonorランドマークも同様に変換
+  const dWarpPts = dPts.map(p => applyAffine(affine, p));
+
+  // ── 4. 結果canvasにベースを描画 ──
+  const rC = document.getElementById('c-result');
+  rC.width = SIZE; rC.height = SIZE;
+  const rCtx = rC.getContext('2d');
+  rCtx.drawImage(bC.el, 0, 0);
+
+  // ── 5. マスクcanvas ──
+  const mC = document.getElementById('c-mask');
+  mC.width = SIZE; mC.height = SIZE;
+  const mCtx = mC.getContext('2d');
+  mCtx.fillStyle = '#0a080a';
+  mCtx.fillRect(0, 0, SIZE, SIZE);
+
+  // ── 6. パーツごとにワーピング合成 ──
+  parts.forEach(part => {
+    const idxs = PART_INDICES[part];
+    if (!idxs) return;
+
+    const bPartPts = idxs.map(i => bPts[i]).filter(Boolean);
+    const dPartPts = idxs.map(i => dWarpPts[i]).filter(Boolean);
+    if (bPartPts.length < 3) return;
+
+    const paddings = { eyes:20, eyebrows:14, nose:18, mouth:16, jawline:10 };
+    const blurAmounts = { eyes:18, eyebrows:14, nose:16, mouth:16, jawline:12 };
+    const pad  = paddings[part]  || 14;
+    const blur = blurAmounts[part] || 14;
+
+    // パーツのBBoxをベース・ドナーそれぞれで計算
+    const bBox = ptsBox(bPartPts, pad, SIZE);
+    const dBox = ptsBox(dPartPts, pad, SIZE);
+
+    // ── パーツ領域内でさらに局所アフィン変換 ──
+    // パーツの重心 + スケール + 角度を合わせる
+    const bCent = centroid(bPartPts);
+    const dCent = centroid(dPartPts);
+    const bSpan = maxSpan(bPartPts);
+    const dSpan = maxSpan(dPartPts);
+    const scaleRatio = dSpan > 0 ? bSpan / dSpan : 1;
+
+    // ドナーパーツを切り出してベースパーツサイズに変換
+    const patchC = makeCanvas(bBox.w, bBox.h);
+    const patchCtx = patchC.ctx;
+
+    // ドナーのパーツ領域をベースの座標系に合わせてレンダリング
+    patchCtx.save();
+    // 1. ベースパーツ重心を原点に
+    patchCtx.translate(bCent[0] - bBox.x, bCent[1] - bBox.y);
+    // 2. スケール補正（ドナーのパーツサイズ→ベースのパーツサイズ）
+    patchCtx.scale(scaleRatio, scaleRatio);
+    // 3. ドナーパーツ重心を中心にして描画
+    patchCtx.translate(-dCent[0], -dCent[1]);
+    patchCtx.drawImage(dWarpC.el, 0, 0);
+    patchCtx.restore();
+
+    // ── ソフトマスク（ガウシアンフェザリング）──
+    const maskC = makeCanvas(SIZE);
+    const maskCtx = maskC.ctx;
+
+    // フェザリング用に少し縮小したhullでマスク
+    const hull = convexHull(bPartPts);
+    const shrunkHull = expandHull(hull, -2); // わずかに縮小で境界ぼかし
+
+    maskCtx.save();
+    maskCtx.shadowColor = 'white';
+    maskCtx.shadowBlur  = blur;
+    maskCtx.fillStyle   = 'white';
+    maskCtx.beginPath();
+    maskCtx.moveTo(shrunkHull[0][0], shrunkHull[0][1]);
+    shrunkHull.slice(1).forEach(p => maskCtx.lineTo(p[0], p[1]));
+    maskCtx.closePath();
+    maskCtx.fill();
+    maskCtx.restore();
+
+    // ── ドナーパーツをベース座標に配置 ──
+    const donorFull = makeCanvas(SIZE);
+    donorFull.ctx.drawImage(patchC.el, bBox.x, bBox.y, bBox.w, bBox.h);
+
+    // マスクでクリップ
+    const donorMasked = makeCanvas(SIZE);
+    donorMasked.ctx.drawImage(donorFull.el, 0, 0);
+    donorMasked.ctx.globalCompositeOperation = 'destination-in';
+    donorMasked.ctx.drawImage(maskC.el, 0, 0);
+
+    // ブレンド強度で合成
+    rCtx.globalAlpha = blend;
+    rCtx.drawImage(donorMasked.el, 0, 0);
+    rCtx.globalAlpha = 1.0;
+
+    // マスク可視化
+    const partColors = { eyes:'rgba(126,201,138,0.6)', nose:'rgba(137,196,224,0.6)',
+      mouth:'rgba(224,168,137,0.6)', eyebrows:'rgba(196,137,224,0.6)', jawline:'rgba(224,200,137,0.6)' };
+    mCtx.save();
+    mCtx.shadowColor = partColors[part] || 'rgba(219,168,180,0.6)';
+    mCtx.shadowBlur = blur;
+    mCtx.fillStyle  = partColors[part] || 'rgba(219,168,180,0.6)';
+    mCtx.beginPath();
+    hull.forEach((p,i) => i===0 ? mCtx.moveTo(p[0],p[1]) : mCtx.lineTo(p[0],p[1]));
+    mCtx.closePath();
+    mCtx.fill();
+    mCtx.restore();
+  });
+
+  document.getElementById('empty-result').style.display = 'none';
+  document.getElementById('empty-mask').style.display = 'none';
+  log(`合成完了 ✓  ブレンド強度 ${Math.round(blend*100)}%`, 'ok');
+  log('ヒント: スライダーを30〜60%にすると自然に馴染みます');
+};
+
+// ── Geometry & math helpers ───────────────────────────────────────────────────
+
+function makeCanvas(w, h) {
+  const el = document.createElement('canvas');
+  el.width  = w || 512;
+  el.height = h || w || 512;
+  return { el, ctx: el.getContext('2d') };
+}
+
+// アフィン変換行列: src2点 → dst2点 (相似変換: 回転+拡縮+平行移動)
+function computeAffine(srcL, srcR, dstL, dstR) {
+  const sx = srcR[0] - srcL[0], sy = srcR[1] - srcL[1];
+  const dx = dstR[0] - dstL[0], dy = dstR[1] - dstL[1];
+  const sLen = Math.sqrt(sx*sx + sy*sy) || 1;
+  const dLen = Math.sqrt(dx*dx + dy*dy) || 1;
+  const scale = dLen / sLen;
+  const angle = Math.atan2(dy, dx) - Math.atan2(sy, sx);
+  const cosA = Math.cos(angle) * scale;
+  const sinA = Math.sin(angle) * scale;
+  // src重心→dst重心の平行移動
+  const sCx = (srcL[0]+srcR[0])/2, sCy = (srcL[1]+srcR[1])/2;
+  const dCx = (dstL[0]+dstR[0])/2, dCy = (dstL[1]+dstR[1])/2;
+  return {
+    a:  cosA, b: sinA,
+    c: -sinA, d: cosA,
+    e: dCx - cosA*sCx + sinA*sCy,
+    f: dCy - sinA*sCx - cosA*sCy
+  };
+}
+
+function applyAffine(m, p) {
+  return [
+    m.a*p[0] + m.c*p[1] + m.e,
+    m.b*p[0] + m.d*p[1] + m.f
+  ];
+}
+
+function centroid(pts) {
+  return [
+    pts.reduce((s,p)=>s+p[0],0)/pts.length,
+    pts.reduce((s,p)=>s+p[1],0)/pts.length
+  ];
+}
+
+function maxSpan(pts) {
+  let maxD = 0;
+  for (let i=0; i<pts.length; i++)
+    for (let j=i+1; j<pts.length; j++) {
+      const dx=pts[i][0]-pts[j][0], dy=pts[i][1]-pts[j][1];
+      maxD = Math.max(maxD, Math.sqrt(dx*dx+dy*dy));
+    }
+  return maxD;
+}
+
+function ptsBox(pts, pad, maxSize) {
+  const xs = pts.map(p=>p[0]), ys = pts.map(p=>p[1]);
+  const x  = Math.max(0, Math.min(...xs)-pad);
+  const y  = Math.max(0, Math.min(...ys)-pad);
+  const x2 = Math.min(maxSize||9999, Math.max(...xs)+pad);
+  const y2 = Math.min(maxSize||9999, Math.max(...ys)+pad);
+  return { x, y, w: x2-x, h: y2-y };
+}
+
+// 重心ベースの凸包（簡易版）: 点を角度順にソート
+function convexHull(pts) {
+  const cx = pts.reduce((s,p)=>s+p[0],0)/pts.length;
+  const cy = pts.reduce((s,p)=>s+p[1],0)/pts.length;
+  return [...pts].sort((a,b)=>
+    Math.atan2(a[1]-cy,a[0]-cx) - Math.atan2(b[1]-cy,b[0]-cx)
+  );
+}
+
+function expandHull(hull, pad) {
+  const cx = hull.reduce((s,p)=>s+p[0],0)/hull.length;
+  const cy = hull.reduce((s,p)=>s+p[1],0)/hull.length;
+  return hull.map(p => {
+    const dx=p[0]-cx, dy=p[1]-cy;
+    const len=Math.sqrt(dx*dx+dy*dy)||1;
+    return [p[0]+(dx/len)*pad, p[1]+(dy/len)*pad];
+  });
+}
+
+// ── Download ──────────────────────────────────────────────────────────────────
+window.downloadCanvas = function(id) {
+  const c = document.getElementById(id);
+  if (!c || c.width === 0) { log('ダウンロードする画像がありません', 'err'); return; }
+  const a = document.createElement('a');
+  a.download = id + '.png';
+  a.href = c.toDataURL('image/png');
+  a.click();
+  log(`${id}.png をダウンロードしました`, 'ok');
+};
+
+// ── Chip toggle ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.chip').forEach(c => {
+  c.addEventListener('click', () => c.classList.toggle('on'));
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+initLandmarker();
+
+</script>
+</body>
+</html>
